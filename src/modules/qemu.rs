@@ -1,8 +1,8 @@
 use crate::utils::error::Error;
+use crate::utils::resource::ResourceValue;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
-use crate::utils::resource::ResourceValue;
 
 pub struct QemuConfig {
     pub binary: String,

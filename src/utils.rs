@@ -1,3 +1,3 @@
 pub mod error;
-pub mod shell;
 pub mod resource;
+pub mod shell;

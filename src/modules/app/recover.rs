@@ -1,11 +1,11 @@
-use crate::utils::error::Error;
-use clap::Args;
 use crate::modules::app::run::run_qemu;
-use dirs;
-use std::fs;
-use std::collections::HashMap;
-use std::str::FromStr;
+use crate::utils::error::Error;
 use crate::utils::resource::ResourceValue;
+use clap::Args;
+use dirs;
+use std::collections::HashMap;
+use std::fs;
+use std::str::FromStr;
 
 #[derive(Args)]
 pub struct RecoverCommand {
@@ -42,7 +42,10 @@ impl RecoverCommand {
             .lines()
             .filter_map(|line| {
                 let mut parts = line.splitn(2, '=');
-                Some((parts.next()?.trim(), parts.next()?.trim().trim_matches('\'')))
+                Some((
+                    parts.next()?.trim(),
+                    parts.next()?.trim().trim_matches('\''),
+                ))
             })
             .collect();
 

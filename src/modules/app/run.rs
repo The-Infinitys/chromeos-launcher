@@ -1,12 +1,12 @@
 use crate::modules::qemu::{self};
 use crate::utils::error::Error;
+use crate::utils::resource::ResourceValue;
 use clap::Args;
 use dirs;
 use std::collections::HashMap;
 use std::fs;
 use std::process::{Command, Stdio};
 use std::str::FromStr;
-use crate::utils::resource::ResourceValue;
 
 #[derive(Args)]
 pub struct RunCommand {
@@ -52,7 +52,10 @@ impl RunCommand {
             .lines()
             .filter_map(|line| {
                 let mut parts = line.splitn(2, '=');
-                Some((parts.next()?.trim(), parts.next()?.trim().trim_matches('\'')))
+                Some((
+                    parts.next()?.trim(),
+                    parts.next()?.trim().trim_matches('\''),
+                ))
             })
             .collect();
 

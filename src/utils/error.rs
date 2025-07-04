@@ -21,13 +21,13 @@ impl Error {
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f,"{}:","Error".red().bold())?;
+        writeln!(f, "{}:", "Error".red().bold())?;
         self.display_for(f)
     }
 }
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    	writeln!(f)?;
+        writeln!(f)?;
         self.display_for(f)
     }
 }

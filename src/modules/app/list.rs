@@ -1,7 +1,7 @@
 use crate::utils::error::Error;
 use dirs;
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
 
 pub fn list() -> Result<(), Error> {
     let machines_dir = dirs::home_dir()
@@ -30,7 +30,10 @@ pub fn list() -> Result<(), Error> {
                 .lines()
                 .filter_map(|line| {
                     let mut parts = line.splitn(2, '=');
-                    Some((parts.next()?.trim(), parts.next()?.trim().trim_matches('\'')))
+                    Some((
+                        parts.next()?.trim(),
+                        parts.next()?.trim().trim_matches('\''),
+                    ))
                 })
                 .collect();
 

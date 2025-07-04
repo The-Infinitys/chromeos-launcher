@@ -74,7 +74,12 @@ impl NewCommand {
 
         let config_content = format!(
             "VM_NAME={}\nDISK_PATH={}\nCPU_CORES={}\nMEMORY={}\nCPU_MODEL={}\nOVMF_CODE={}\n",
-            self.name, self.disk, self.cpu_cores.to_string(), self.memory.to_string(), self.cpu_model, self.ovmf_code.as_deref().unwrap_or("")
+            self.name,
+            self.disk,
+            self.cpu_cores.to_string(),
+            self.memory.to_string(),
+            self.cpu_model,
+            self.ovmf_code.as_deref().unwrap_or("")
         );
         fs::write(config_file, config_content)?;
 
