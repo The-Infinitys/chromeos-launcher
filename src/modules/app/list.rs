@@ -30,7 +30,7 @@ pub fn list() -> Result<(), Error> {
                 .lines()
                 .filter_map(|line| {
                     let mut parts = line.splitn(2, '=');
-                    Some((parts.next()?.trim(), parts.next()?.trim()))
+                    Some((parts.next()?.trim(), parts.next()?.trim().trim_matches('\'')))
                 })
                 .collect();
 
