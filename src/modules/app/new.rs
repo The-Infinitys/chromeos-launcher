@@ -73,8 +73,9 @@ impl NewCommand {
         }
 
         let config_content = format!(
-            "VM_NAME={}\nDISK_PATH={}\nCPU_CORES={}\nMEMORY={}\nCPU_MODEL={}\nOVMF_CODE={}\n",
+            "VM_NAME={}\nISO_PATH={}\nDISK_PATH={}\nCPU_CORES={}\nMEMORY={}\nCPU_MODEL={}\nOVMF_CODE={}\n",
             self.name,
+            self.iso,
             self.disk,
             self.cpu_cores.to_string(),
             self.memory.to_string(),
