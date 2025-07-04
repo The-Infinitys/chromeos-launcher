@@ -1,41 +1,6 @@
 use std::fmt;
 
 use colored::Colorize;
-/*
-fn display_for(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // エラーの種類に基づいて詳細を整形
-        writeln!(f)?;
-        let kind_str = match &self.kind {
-            ErrorKind::Io(err) => {
-                format!("IO Error - {}", err)
-            }
-            ErrorKind::Parse(err) => {
-                format!("Parse Error - {}", err)
-            }
-            ErrorKind::CommandNotFound(cmd) => {
-                format!("Command \"{}\" not found", cmd)
-            }
-            ErrorKind::InvalidArguments(arg_info) => {
-                format!("Invalid Arguments - {}", arg_info)
-            }
-            ErrorKind::Other(desc) => desc.to_string(),
-        };
-        if !kind_str.is_empty() {
-            writeln!(f, "  {}: {}", "Kind".cyan().bold(), kind_str)?;
-        }
-        if let Some(msg) = &self.message {
-            let formatted_str = {
-                let lines: Vec<String> = msg
-                    .split("\n")
-                    .map(|line| format!("    {}", line.trim()))
-                    .collect();
-                lines.join("\n")
-            };
-            writeln!(f, "  {}:|\n{}", "Message".green().bold(), formatted_str)?;
-        }
-        Ok(())
-    }
-*/
 
 pub enum Error {
     Io(std::io::Error),
@@ -62,6 +27,7 @@ impl fmt::Display for Error {
 }
 impl fmt::Debug for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    	writeln!(f)?;
         self.display_for(f)
     }
 }
