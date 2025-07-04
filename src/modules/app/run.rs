@@ -5,6 +5,8 @@ use dirs;
 use std::collections::HashMap;
 use std::fs;
 use std::process::{Command, Stdio};
+use std::str::FromStr;
+use crate::utils::resource::ResourceValue;
 
 #[derive(Args)]
 pub struct RunCommand {
@@ -54,11 +56,15 @@ impl RunCommand {
             })
             .collect();
 
-        let memory = config.get("MEMORY").unwrap_or(&"4G");
-        let cpu_cores = config.get("CPU_CORES").unwrap_or(&"2");
+        let memory_str = config.get("MEMORY").unwrap_or(&"4G");
+        let cpu_cores_str = config.get("CPU_CORES").unwrap_or(&"2");
         let cpu_model = config.get("CPU_MODEL").unwrap_or(&"host");
         let disk_path = config.get("DISK_PATH").unwrap();
         let iso_path = config.get("ISO_PATH");
+        let ovmf_code_str = config.get("OVMF_CODE").map(|s| s.to_string());
+
+        let memory = ResourceValue::from_str(memory_str)?;
+        let cpu_cores = ResourceValue::from_str(cpu_cores_str)?;
 
         run_qemu(
             &vm_name,
@@ -69,9 +75,10 @@ impl RunCommand {
             },
             iso_path.map(|s| s.to_string()),
             disk_path,
-            cpu_cores,
-            memory,
+            &cpu_cores,
+            &memory,
             cpu_model,
+            ovmf_code_str,
         )?;
 
         Ok(())
@@ -83,9 +90,10 @@ pub fn run_qemu(
     mode: &str,
     iso_path: Option<String>,
     disk_path: &str,
-    cpu_cores: &str,
-    memory: &str,
+    cpu_cores: &ResourceValue,
+    memory: &ResourceValue,
     cpu_model: &str,
+    ovmf_code: Option<String>,
 ) -> Result<(), Error> {
     let qemu_config = qemu::detect_arch()?;
 
@@ -123,9 +131,15 @@ pub fn run_qemu(
         fs::copy(&qemu_config.ovmf_vars_template, &ovmf_vars_copy)?;
     }
 
+    let ovmf_code_path = if let Some(path) = ovmf_code {
+        std::path::PathBuf::from(path)
+    } else {
+        qemu_config.ovmf_code_path
+    };
+
     let ovmf_code_arg = format!(
         "if=pflash,format=raw,readonly=on,file={}",
-        qemu_config.ovmf_code_path.display()
+        ovmf_code_path.display()
     );
     let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
     let disk_arg = format!("format=raw,file={}", disk_path);
@@ -174,7 +188,7 @@ pub fn run_qemu(
     println!("  Memory: {}", resolved_mem);
     println!("  CPU Cores: {}", resolved_cores);
     println!("  Disk: {}", disk_path);
-    println!("  UEFI Code: {}", qemu_config.ovmf_code_path.display());
+    println!("  UEFI Code: {}", ovmf_code_path.display());
     if mode == "install" {
         if let Some(iso) = iso_path.as_ref() {
             println!("  ISO (Install Mode): {}", iso);

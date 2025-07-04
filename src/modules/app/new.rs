@@ -5,8 +5,10 @@ use dirs;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::str::FromStr;
 
 use crate::modules::app::run::run_qemu;
+use crate::utils::resource::ResourceValue;
 
 #[derive(Args)]
 pub struct NewCommand {
@@ -18,12 +20,14 @@ pub struct NewCommand {
     disk: String,
     #[clap(long, default_value = "64G")]
     disk_size: String,
-    #[clap(long, default_value = "2")]
-    cpu_cores: String,
-    #[clap(long, default_value = "4G")]
-    memory: String,
+    #[clap(long, default_value = "2", value_parser = ResourceValue::from_str)]
+    cpu_cores: ResourceValue,
+    #[clap(long, default_value = "4G", value_parser = ResourceValue::from_str)]
+    memory: ResourceValue,
     #[clap(long, default_value = "host")]
     cpu_model: String,
+    #[clap(long)]
+    ovmf_code: Option<String>,
 }
 
 impl NewCommand {
@@ -69,8 +73,8 @@ impl NewCommand {
         }
 
         let config_content = format!(
-            "VM_NAME='{}'\nISO_PATH='{}'\nDISK_PATH='{}'\nCPU_CORES='{}'\nMEMORY='{}'\nCPU_MODEL='{}'\n",
-            self.name, self.iso, self.disk, self.cpu_cores, self.memory, self.cpu_model
+            "VM_NAME='{}'\nISO_PATH='{}'\nDISK_PATH='{}'\nCPU_CORES='{}'\nMEMORY='{}'\nCPU_MODEL='{}'\nOVMF_CODE={}\n",
+            self.name, self.iso, self.disk, self.cpu_cores.to_string(), self.memory.to_string(), self.cpu_model, self.ovmf_code.as_deref().unwrap_or("")
         );
         fs::write(config_file, config_content)?;
 
@@ -85,6 +89,7 @@ impl NewCommand {
             &self.cpu_cores,
             &self.memory,
             &self.cpu_model,
+            self.ovmf_code.clone(),
         )?;
 
         Ok(())

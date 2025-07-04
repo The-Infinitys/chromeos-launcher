@@ -2,6 +2,7 @@ use crate::utils::error::Error;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use crate::utils::resource::ResourceValue;
 
 pub struct QemuConfig {
     pub binary: String,
@@ -60,16 +61,26 @@ fn find_ovmf_file(ovmf_dir: &PathBuf, file_type: &str) -> Result<PathBuf, Error>
     )))
 }
 
-pub fn resolve_value(value: &str, total: u64, unit: Option<&str>) -> String {
-    if let Some(stripped) = value.strip_suffix("%") {
-        let percentage = stripped.parse::<u64>().unwrap_or(0);
-        let result = (total * percentage / 100) as f64;
-        match unit {
-            Some("M") => format!("{}M", (result / 1024.0).round() as u64),
-            Some("G") => format!("{}G", (result / 1024.0 / 1024.0).round() as u64),
-            _ => format!("{}", result.round() as u64),
+pub fn resolve_value(value: &ResourceValue, total: u64, unit: Option<&str>) -> String {
+    match value {
+        ResourceValue::Absolute(val) => {
+            if let Some(u) = unit {
+                match u {
+                    "M" => format!("{}M", (val / (1024 * 1024))),
+                    "G" => format!("{}G", (val / (1024 * 1024 * 1024))),
+                    _ => val.to_string(),
+                }
+            } else {
+                val.to_string()
+            }
         }
-    } else {
-        value.to_string()
+        ResourceValue::Percentage(percentage) => {
+            let result = (total * (*percentage as u64) / 100) as f64;
+            match unit {
+                Some("M") => format!("{}M", (result / 1024.0).round() as u64),
+                Some("G") => format!("{}G", (result / 1024.0 / 1024.0).round() as u64),
+                _ => format!("{}", result.round() as u64),
+            }
+        }
     }
 }
