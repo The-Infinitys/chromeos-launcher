@@ -1,9 +1,9 @@
 // src/main.rs
-
+use clap::{Parser, Subcommand};
 use std::env;
-use std::path::PathBuf;
 #[cfg(target_family = "unix")] // Linuxを含むUnix系OSに限定
-use std::os::unix::fs::PermissionsExt; // 実行可能ビットのチェックに必要
+use std::os::unix::fs::PermissionsExt;
+use std::path::PathBuf; // 実行可能ビットのチェックに必要
 
 /// 指定されたコマンドが環境変数PATH経由で利用可能かどうかをチェックします。
 ///
@@ -44,4 +44,25 @@ pub fn is_available(cmd: &str) -> bool {
     }
 
     false // どのパスでも見つからなかった場合
+}
+#[derive(Parser)]
+#[clap(
+    name = env!("CARGO_PKG_NAME"),
+    version = env!("CARGO_PKG_VERSION"),
+    author = env!("CARGO_PKG_AUTHORS"),
+    about = env!("CARGO_PKG_DESCRIPTION"),
+    arg_required_else_help = true,
+)]
+pub struct Args {
+    #[clap(subcommand)]
+    pub sub_command: SubCommands,
+    #[arg(last = true, help = "Unused")]
+    last_args: Vec<String>,
+}
+#[derive(Subcommand)]
+pub enum SubCommands {
+    Run,
+    List,
+    New,
+    Remove,
 }

@@ -1,0 +1,144 @@
+#!/bin/bash
+
+set -euo pipefail
+
+cmd=$(basename $0)
+
+name=chromeos
+recoveryDriveOpt=()
+cdromOpt=()
+vmRootDir="$HOME/vm/qemu"
+xres=1280
+yres=800
+memory=4G
+smp=2
+# hddSizeは/dev/sdcを使用するため、ここでは直接使用されません
+# hddSize=50G
+vga="-device virtio-vga-gl,xres="$xres",yres="$yres""
+
+# ~/.chromeoslauncher が存在すれば読み込む
+if [ -f ~/.chromeoslauncher ];then
+    source ~/.chromeoslauncher
+fi
+
+usage() {
+    cat <<EOF
+usage: ${cmd} [options]
+    options:
+    -r recoveryImage    : ChromeOSリカバリイメージのパスを指定
+    -c isoImage         : CD-ROM/ISOイメージのパスを指定
+    -n name             : 仮想マシンの名前を指定 (デフォルト: $name)
+    -s num              : CPUコア数を指定 (デフォルト: $smp)
+    -3                  : 仮想3Dアクセラレーションを使用 (virtio-vga-glの代わりに-vga virtioを使用)
+    -h                  : このヘルプメッセージを表示
+EOF
+}
+
+# オプションのパース
+while getopts 3s:r:c:n:h OPT; do
+    case $OPT in
+        r)  recoveryDriveOpt+=("-drive")
+            recoveryDriveOpt+=("format=raw,file=$OPTARG")
+            ;;
+        c)  cdromOpt+=("-boot")
+            cdromOpt+=("order=d")
+            cdromOpt+=("-cdrom")
+            cdromOpt+=("$OPTARG")
+            ;;
+        n)  name="$OPTARG"
+            ;;
+        s)  smp="$OPTARG"
+            ;;
+        3)  vga="-vga virtio" # 仮想3Dアクセラレーションを有効にする場合
+            ;;
+        h)  usage
+            exit 0
+            ;;
+        ?)  usage
+            exit 1
+            ;;
+    esac
+done
+shift `expr $OPTIND - 1`
+
+vmDir="$vmRootDir/$name"
+hddImage="/dev/sdc" # HDDイメージのパスを/dev/sdcに設定
+
+# VMディレクトリが存在しない場合は作成
+if [ ! -d "$vmDir" ]; then
+    echo "Creating VM directory: $vmDir"
+    mkdir -p "$vmDir"
+fi
+
+# hddImage (/dev/sdc) の所有者とグループを確認し、必要であれば変更
+# /dev/sdcはデバイスファイルであるため、chownにはsudo権限が必要な場合があります。
+if [ -b "$hddImage" ]; then # -b はブロックデバイスファイルが存在するかチェック
+    current_uid=$(id -u)
+    current_gid=$(id -g)
+    file_uid=$(stat -c %u "$hddImage")
+    file_gid=$(stat -c %g "$hddImage")
+
+    if [ "$file_uid" -ne "$current_uid" ] || [ "$file_gid" -ne "$current_gid" ]; then
+        echo "Changing ownership of $hddImage to $USER:$USER"
+        # chownは通常sudoが必要な操作です。
+        chown "$current_uid":"$current_gid" "$hddImage" || {
+            echo "Warning: Could not change ownership of $hddImage. You likely need to run this script with sudo or manually change ownership (e.g., sudo chown $USER:$USER $hddImage)." >&2
+        }
+    fi
+else
+    echo "Error: $hddImage is not a block device or does not exist. Please ensure it's correctly specified." >&2
+    exit 1
+fi
+
+# OVMF_VARS.fd が存在しない場合はコピーし、所有権を確認・変更
+if [ ! -f "$vmDir"/OVMF_VARS.fd ]; then
+    echo "Copying OVMF_VARS.fd to $vmDir"
+    cp /usr/share/OVMF/OVMF_VARS.fd "$vmDir"
+
+    # コピー後、OVMF_VARS.fdの所有者とグループを確認し、必要であれば変更
+    if [ -f "$vmDir"/OVMF_VARS.fd ]; then
+        current_uid=$(id -u)
+        current_gid=$(id -g)
+        file_uid=$(stat -c %u "$vmDir"/OVMF_VARS.fd)
+        file_gid=$(stat -c %g "$vmDir"/OVMF_VARS.fd)
+
+        if [ "$file_uid" -ne "$current_uid" ] || [ "$file_gid" -ne "$current_gid" ]; then
+            echo "Changing ownership of $vmDir/OVMF_VARS.fd to $USER:$USER"
+            chown "$current_uid":"$current_gid" "$vmDir"/OVMF_VARS.fd || {
+                echo "Warning: Could not change ownership of $vmDir/OVMF_VARS.fd. You might need to run this script with sudo or manually change ownership." >&2
+            }
+        fi
+    fi
+fi
+
+# CD-ROMオプションが指定されている場合（リカバリモードなど）
+if [ "${#cdromOpt[@]}" -gt 0 ]; then
+    echo "Starting QEMU with CD-ROM boot..."
+    exec qemu-system-x86_64 \
+    -display sdl,show-cursor=on \
+    "${cdromOpt[@]}" \
+    -drive format=raw,file="$hddImage" \
+    -m "$memory" \
+    -enable-kvm \
+    -smp "$smp" \
+    -usb -device usb-tablet \
+    -cpu host # CPUをホストに合わせることでパフォーマンス向上
+    exit
+fi
+
+# 通常の起動
+echo "Starting QEMU with ChromeOS..."
+exec qemu-system-x86_64 \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+    -drive if=pflash,format=raw,file="$vmDir"/OVMF_VARS.fd \
+    -display sdl,show-cursor=on,gl=on \
+    $vga \
+    -usb -device usb-tablet \
+    "${recoveryDriveOpt[@]}" \
+    -drive format=raw,file="$hddImage" \
+    -m "$memory" \
+    -enable-kvm \
+    -smp "$smp" \
+    -audiodev sdl,id=audio0 \
+    -device intel-hda -device hda-output,audiodev=audio0 \
+    -cpu host
