@@ -46,8 +46,8 @@ fn find_ovmf_file(ovmf_dir: &PathBuf, file_type: &str) -> Result<PathBuf, Error>
 }
 
 pub fn resolve_value(value: &str, total: u64, unit: Option<&str>) -> String {
-    if value.ends_with("%") {
-        let percentage = value[..value.len() - 1].parse::<u64>().unwrap_or(0);
+    if let Some(stripped) = value.strip_suffix("%") {
+        let percentage = stripped.parse::<u64>().unwrap_or(0);
         let result = (total * percentage / 100) as f64;
         match unit {
             Some("M") => format!("{}M", (result / 1024.0).round() as u64),
