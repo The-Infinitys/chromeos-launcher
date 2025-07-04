@@ -1,10 +1,10 @@
+use crate::modules::qemu::{self};
 use crate::utils::error::Error;
 use clap::Args;
 use dirs;
 use std::collections::HashMap;
 use std::fs;
 use std::process::{Command, Stdio};
-use crate::modules::qemu::{self};
 
 #[derive(Args)]
 pub struct RunCommand {
@@ -14,7 +14,12 @@ pub struct RunCommand {
 impl RunCommand {
     pub fn exec(&self) -> Result<(), Error> {
         let config_dir = dirs::home_dir()
-            .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+            .ok_or_else(|| {
+                Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Home directory not found",
+                ))
+            })?
             .join(".chromeos-launcher");
         let machines_dir = config_dir.join("machines");
         let last_run_file = config_dir.join("last_run");
@@ -57,7 +62,11 @@ impl RunCommand {
 
         run_qemu(
             &vm_name,
-            if iso_path.is_some() { "install" } else { "normal" },
+            if iso_path.is_some() {
+                "install"
+            } else {
+                "normal"
+            },
             iso_path.map(|s| s.to_string()),
             disk_path,
             cpu_cores,
@@ -80,14 +89,31 @@ pub fn run_qemu(
 ) -> Result<(), Error> {
     let qemu_config = qemu::detect_arch()?;
 
-    let total_mem_kb = sys_info::mem_info().map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get memory info: {}", e))))?.total;
-    let total_cores = sys_info::cpu_num().map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get CPU info: {}", e))))? as u64;
+    let total_mem_kb = sys_info::mem_info()
+        .map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "Failed to get memory info: {}",
+                e
+            )))
+        })?
+        .total;
+    let total_cores = sys_info::cpu_num().map_err(|e| {
+        Error::Io(std::io::Error::other(format!(
+            "Failed to get CPU info: {}",
+            e
+        )))
+    })? as u64;
 
     let resolved_mem = qemu::resolve_value(memory, total_mem_kb, Some("G"));
     let resolved_cores = qemu::resolve_value(cpu_cores, total_cores, None);
 
     let config_dir = dirs::home_dir()
-        .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+        .ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Home directory not found",
+            ))
+        })?
         .join(".chromeos-launcher");
     let machines_dir = config_dir.join("machines");
     let last_run_file = config_dir.join("last_run");
@@ -97,7 +123,10 @@ pub fn run_qemu(
         fs::copy(&qemu_config.ovmf_vars_template, &ovmf_vars_copy)?;
     }
 
-    let ovmf_code_arg = format!("if=pflash,format=raw,readonly=on,file={}", qemu_config.ovmf_code_path.display());
+    let ovmf_code_arg = format!(
+        "if=pflash,format=raw,readonly=on,file={}",
+        qemu_config.ovmf_code_path.display()
+    );
     let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
     let disk_arg = format!("format=raw,file={}", disk_path);
 

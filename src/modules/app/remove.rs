@@ -12,7 +12,12 @@ pub struct RemoveCommand {
 impl RemoveCommand {
     pub fn exec(&self) -> Result<(), Error> {
         let config_dir = dirs::home_dir()
-            .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+            .ok_or_else(|| {
+                Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Home directory not found",
+                ))
+            })?
             .join(".chromeos-launcher");
         let machines_dir = config_dir.join("machines");
         let config_file = machines_dir.join(&self.name);
@@ -25,10 +30,15 @@ impl RemoveCommand {
         }
 
         let config_content = fs::read_to_string(&config_file)?;
-        let disk_path_line = config_content.lines().find(|line| line.starts_with("DISK_PATH="));
+        let disk_path_line = config_content
+            .lines()
+            .find(|line| line.starts_with("DISK_PATH="));
         let disk_path = disk_path_line.map(|line| line.split('=').nth(1).unwrap().trim());
 
-        print!("Are you sure you want to remove the VM '{}'? [y/N] ", self.name);
+        print!(
+            "Are you sure you want to remove the VM '{}'? [y/N] ",
+            self.name
+        );
         io::stdout().flush()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
@@ -39,7 +49,10 @@ impl RemoveCommand {
 
         if let Some(disk_path) = disk_path {
             if fs::metadata(disk_path).is_ok() {
-                print!("Do you also want to delete the disk file '{}'? [y/N] ", disk_path);
+                print!(
+                    "Do you also want to delete the disk file '{}'? [y/N] ",
+                    disk_path
+                );
                 io::stdout().flush()?;
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;

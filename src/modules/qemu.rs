@@ -1,7 +1,7 @@
 use crate::utils::error::Error;
-use std::path::PathBuf;
 use std::fs;
 use std::io::ErrorKind;
+use std::path::PathBuf;
 
 pub struct QemuConfig {
     pub binary: String,
@@ -14,12 +14,20 @@ pub fn detect_arch() -> Result<QemuConfig, Error> {
     let (qemu_binary, ovmf_dir_name) = match arch {
         "x86_64" => ("qemu-system-x86_64", "OVMF"),
         "aarch64" => ("qemu-system-aarch64", "AAVMF"),
-        _ => return Err(Error::Io(std::io::Error::other(format!("Unsupported architecture: {}", arch)))),
+        _ => {
+            return Err(Error::Io(std::io::Error::other(format!(
+                "Unsupported architecture: {}",
+                arch
+            ))));
+        }
     };
 
     let ovmf_dir = PathBuf::from(format!("/usr/share/{}", ovmf_dir_name));
     if !ovmf_dir.exists() {
-        return Err(Error::Io(std::io::Error::new(ErrorKind::NotFound, format!("OVMF/AAVMF directory not found: {}", ovmf_dir.display()))));
+        return Err(Error::Io(std::io::Error::new(
+            ErrorKind::NotFound,
+            format!("OVMF/AAVMF directory not found: {}", ovmf_dir.display()),
+        )));
     }
 
     let ovmf_code_path = find_ovmf_file(&ovmf_dir, "CODE")?;
@@ -42,7 +50,14 @@ fn find_ovmf_file(ovmf_dir: &PathBuf, file_type: &str) -> Result<PathBuf, Error>
             }
         }
     }
-    Err(Error::Io(std::io::Error::new(ErrorKind::NotFound, format!("OVMF/AAVMF {} file not found in {}", file_type, ovmf_dir.display()))))
+    Err(Error::Io(std::io::Error::new(
+        ErrorKind::NotFound,
+        format!(
+            "OVMF/AAVMF {} file not found in {}",
+            file_type,
+            ovmf_dir.display()
+        ),
+    )))
 }
 
 pub fn resolve_value(value: &str, total: u64, unit: Option<&str>) -> String {

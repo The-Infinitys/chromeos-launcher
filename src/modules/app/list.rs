@@ -4,7 +4,12 @@ use std::fs;
 
 pub fn list() -> Result<(), Error> {
     let machines_dir = dirs::home_dir()
-        .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+        .ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Home directory not found",
+            ))
+        })?
         .join(".chromeos-launcher/machines");
 
     if !machines_dir.exists() {

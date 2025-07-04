@@ -1,5 +1,5 @@
 use crate::utils::error::Error;
-use crate::utils::shell::{is_available, Args, SubCommands};
+use crate::utils::shell::{Args, SubCommands, is_available};
 
 pub mod list;
 pub mod new;

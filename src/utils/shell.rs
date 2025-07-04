@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 #[cfg(target_family = "unix")] // Linuxを含むUnix系OSに限定
 use std::os::unix::fs::PermissionsExt;
- // 実行可能ビットのチェックに必要
+// 実行可能ビットのチェックに必要
 
 /// 指定されたコマンドが環境変数PATH経由で利用可能かどうかをチェックします。
 ///

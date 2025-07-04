@@ -31,7 +31,12 @@ impl NewCommand {
         println!("Creating new VM...");
 
         let config_dir = dirs::home_dir()
-            .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+            .ok_or_else(|| {
+                Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Home directory not found",
+                ))
+            })?
             .join(".chromeos-launcher");
         let machines_dir = config_dir.join("machines");
         fs::create_dir_all(&machines_dir)?;
