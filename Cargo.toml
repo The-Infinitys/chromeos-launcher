@@ -6,3 +6,5 @@ build = "build.rs"
 [dependencies]
 clap = { version = "4.5.40", features = ["derive"] }
 colored = "3.0.0"
+dirs = "5.0.1"
+sys-info = "0.9.1"

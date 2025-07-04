@@ -1,4 +1,7 @@
 // src/main.rs
+use crate::modules::app::new::NewCommand;
+use crate::modules::app::remove::RemoveCommand;
+use crate::modules::app::run::RunCommand;
 use clap::{Parser, Subcommand};
 use std::env;
 #[cfg(target_family = "unix")] // Linuxを含むUnix系OSに限定
@@ -61,8 +64,8 @@ pub struct Args {
 }
 #[derive(Subcommand)]
 pub enum SubCommands {
-    Run,
+    Run(RunCommand),
     List,
-    New,
-    Remove,
+    New(NewCommand),
+    Remove(RemoveCommand),
 }

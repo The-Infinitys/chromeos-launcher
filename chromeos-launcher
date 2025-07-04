@@ -17,7 +17,7 @@ LAST_RUN_FILE="$CONFIG_DIR/last_run"
 # ヘルプメッセージを表示する関数
 usage() {
     cat <<EOF
-ChromeOS QEMU Launcher
+ChromeOS QEMU Launcher 🚀
 
 A script to easily create, run, and manage ChromeOS virtual machines.
 
@@ -35,19 +35,22 @@ For help with a specific command, run:
 EOF
 }
 
-# アーキテクチャを判別し、適切なQEMUバイナリを設定する関数
+# アーキテクチャを判別し、適切なQEMUバイナリとファームウェアパスを設定する関数
 detect_arch() {
     case "$(uname -m)" in
         x86_64)
             QEMU_BINARY="qemu-system-x86_64"
-            OVMF_CODE_PATH="/usr/share/OVMF/OVMF_CODE.fd"
-            OVMF_VARS_TEMPLATE="/usr/share/OVMF/OVMF_VARS.fd"
+            local ovmf_dir="/usr/share/OVMF"
+            # パターンに一致する最初のファイルを検索
+            OVMF_CODE_PATH=$(find "$ovmf_dir" -name "OVMF_CODE*.fd" 2>/dev/null | head -n 1)
+            OVMF_VARS_TEMPLATE=$(find "$ovmf_dir" -name "OVMF_VARS*.fd" 2>/dev/null | head -n 1)
             ;;
         aarch64)
             QEMU_BINARY="qemu-system-aarch64"
-            # パスは環境によって異なる場合があります
-            OVMF_CODE_PATH="/usr/share/AAVMF/AAVMF_CODE.fd"
-            OVMF_VARS_TEMPLATE="/usr/share/AAVMF/AAVMF_VARS.fd"
+            local aavmf_dir="/usr/share/AAVMF"
+            # パターンに一致する最初のファイルを検索
+            OVMF_CODE_PATH=$(find "$aavmf_dir" -name "AAVMF_CODE*.fd" 2>/dev/null | head -n 1)
+            OVMF_VARS_TEMPLATE=$(find "$aavmf_dir" -name "AAVMF_VARS*.fd" 2>/dev/null | head -n 1)
             ;;
         *)
             echo "Error: Unsupported architecture '$(uname -m)'." >&2
@@ -55,21 +58,19 @@ detect_arch() {
             ;;
     esac
 
-    if [ ! -f "$OVMF_CODE_PATH" ] || [ ! -f "$OVMF_VARS_TEMPLATE" ]; then
-        echo "Error: OVMF/AAVMF firmware files not found." >&2
-        echo "Please install OVMF (for x86_64) or AAVMF (for aarch64)." >&2
+    # ファームウェアファイルが見つかったか確認
+    if [ -z "$OVMF_CODE_PATH" ] || [ -z "$OVMF_VARS_TEMPLATE" ]; then
+        echo "Error: Could not find OVMF/AAVMF firmware files." >&2
+        echo "Please ensure OVMF (for x86_64) or AAVMF (for aarch64) is installed." >&2
         exit 1
     fi
 }
 
 # パーセンテージ表記を絶対値に変換する関数
-# $1: 値 (例: "8G", "50%")
-# $2: 合計値 (メモリの場合はKB, CPUの場合はコア数)
-# $3: 単位 (例: "M", "G")
 resolve_value() {
     local value="$1"
     local total="$2"
-    local unit="$3"
+    local unit="${3:-}" # unit is optional
 
     if [[ "$value" == *"%"* ]]; then
         local percentage="${value//%}"
@@ -117,9 +118,7 @@ EOF
 
 cmd_new() {
     # デフォルト値
-    local vm_name=""
-    local iso_path=""
-    local disk_path=""
+    local vm_name="" iso_path="" disk_path=""
     local disk_size="64G"
     local cpu_cores="2"
     local memory="4G"
@@ -295,8 +294,9 @@ run_qemu() {
 
     # UEFI変数の準備
     local ovmf_vars_copy="$MACHINES_DIR/${vm_name}.vars"
-    if [ ! -f "$ovmf_vars_copy" ]; then
-        echo "Copying UEFI variables template..."
+    if [ ! -f "$ovmf_vars_copy" ];
+    then
+        echo "Copying UEFI variables template from '$OVMF_VARS_TEMPLATE'..."
         cp "$OVMF_VARS_TEMPLATE" "$ovmf_vars_copy"
     fi
 
@@ -331,6 +331,7 @@ run_qemu() {
     echo "  Memory: $resolved_mem"
     echo "  CPU Cores: $resolved_cores"
     echo "  Disk: $DISK_PATH"
+    echo "  UEFI Code: $OVMF_CODE_PATH"
     [ "$mode" == "install" ] && echo "  ISO (Install Mode): $ISO_PATH"
     echo "---"
 
@@ -346,7 +347,7 @@ run_qemu() {
 
 # スクリプトの初期化
 detect_arch
-mkdir -p "$MACHINES_DIR"
+mkdir -p "$CONFIG_DIR" "$MACHINES_DIR"
 
 # 引数がない場合はヘルプを表示
 if [ $# -eq 0 ]; then
