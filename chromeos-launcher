@@ -1,144 +1,378 @@
 #!/bin/bash
 
+# スクリプトがエラーで停止するように設定
 set -euo pipefail
 
-cmd=$(basename $0)
+# --- グローバル変数と設定 ---
 
-name=chromeos
-recoveryDriveOpt=()
-cdromOpt=()
-vmRootDir="$HOME/vm/qemu"
-xres=1280
-yres=800
-memory=4G
-smp=2
-# hddSizeは/dev/sdcを使用するため、ここでは直接使用されません
-# hddSize=50G
-vga="-device virtio-vga-gl,xres="$xres",yres="$yres""
+# 設定ファイルを保存するメインディレクトリ
+CONFIG_DIR="$HOME/.chromeos-launcher"
+# 各仮想マシンの設定ファイルを保存するディレクトリ
+MACHINES_DIR="$CONFIG_DIR/machines"
+# 最後に実行したVMの名前を保存するファイル
+LAST_RUN_FILE="$CONFIG_DIR/last_run"
 
-# ~/.chromeoslauncher が存在すれば読み込む
-if [ -f ~/.chromeoslauncher ];then
-    source ~/.chromeoslauncher
-fi
+# --- ヘルパー関数 ---
 
+# ヘルプメッセージを表示する関数
 usage() {
     cat <<EOF
-usage: ${cmd} [options]
-    options:
-    -r recoveryImage    : ChromeOSリカバリイメージのパスを指定
-    -c isoImage         : CD-ROM/ISOイメージのパスを指定
-    -n name             : 仮想マシンの名前を指定 (デフォルト: $name)
-    -s num              : CPUコア数を指定 (デフォルト: $smp)
-    -3                  : 仮想3Dアクセラレーションを使用 (virtio-vga-glの代わりに-vga virtioを使用)
-    -h                  : このヘルプメッセージを表示
+ChromeOS QEMU Launcher
+
+A script to easily create, run, and manage ChromeOS virtual machines.
+
+Usage:
+  $(basename "$0") <command> [options]
+
+Commands:
+  new       Create a new ChromeOS virtual machine and start installation.
+  run       Run an existing virtual machine.
+  rm        Remove a virtual machine and its data.
+  --help    Show this help message.
+
+For help with a specific command, run:
+  $(basename "$0") <command> --help
 EOF
 }
 
-# オプションのパース
-while getopts 3s:r:c:n:h OPT; do
-    case $OPT in
-        r)  recoveryDriveOpt+=("-drive")
-            recoveryDriveOpt+=("format=raw,file=$OPTARG")
+# アーキテクチャを判別し、適切なQEMUバイナリを設定する関数
+detect_arch() {
+    case "$(uname -m)" in
+        x86_64)
+            QEMU_BINARY="qemu-system-x86_64"
+            OVMF_CODE_PATH="/usr/share/OVMF/OVMF_CODE.fd"
+            OVMF_VARS_TEMPLATE="/usr/share/OVMF/OVMF_VARS.fd"
             ;;
-        c)  cdromOpt+=("-boot")
-            cdromOpt+=("order=d")
-            cdromOpt+=("-cdrom")
-            cdromOpt+=("$OPTARG")
+        aarch64)
+            QEMU_BINARY="qemu-system-aarch64"
+            # パスは環境によって異なる場合があります
+            OVMF_CODE_PATH="/usr/share/AAVMF/AAVMF_CODE.fd"
+            OVMF_VARS_TEMPLATE="/usr/share/AAVMF/AAVMF_VARS.fd"
             ;;
-        n)  name="$OPTARG"
-            ;;
-        s)  smp="$OPTARG"
-            ;;
-        3)  vga="-vga virtio" # 仮想3Dアクセラレーションを有効にする場合
-            ;;
-        h)  usage
-            exit 0
-            ;;
-        ?)  usage
+        *)
+            echo "Error: Unsupported architecture '$(uname -m)'." >&2
             exit 1
             ;;
     esac
-done
-shift `expr $OPTIND - 1`
 
-vmDir="$vmRootDir/$name"
-hddImage="/dev/sdc" # HDDイメージのパスを/dev/sdcに設定
-
-# VMディレクトリが存在しない場合は作成
-if [ ! -d "$vmDir" ]; then
-    echo "Creating VM directory: $vmDir"
-    mkdir -p "$vmDir"
-fi
-
-# hddImage (/dev/sdc) の所有者とグループを確認し、必要であれば変更
-# /dev/sdcはデバイスファイルであるため、chownにはsudo権限が必要な場合があります。
-if [ -b "$hddImage" ]; then # -b はブロックデバイスファイルが存在するかチェック
-    current_uid=$(id -u)
-    current_gid=$(id -g)
-    file_uid=$(stat -c %u "$hddImage")
-    file_gid=$(stat -c %g "$hddImage")
-
-    if [ "$file_uid" -ne "$current_uid" ] || [ "$file_gid" -ne "$current_gid" ]; then
-        echo "Changing ownership of $hddImage to $USER:$USER"
-        # chownは通常sudoが必要な操作です。
-        chown "$current_uid":"$current_gid" "$hddImage" || {
-            echo "Warning: Could not change ownership of $hddImage. You likely need to run this script with sudo or manually change ownership (e.g., sudo chown $USER:$USER $hddImage)." >&2
-        }
+    if [ ! -f "$OVMF_CODE_PATH" ] || [ ! -f "$OVMF_VARS_TEMPLATE" ]; then
+        echo "Error: OVMF/AAVMF firmware files not found." >&2
+        echo "Please install OVMF (for x86_64) or AAVMF (for aarch64)." >&2
+        exit 1
     fi
-else
-    echo "Error: $hddImage is not a block device or does not exist. Please ensure it's correctly specified." >&2
+}
+
+# パーセンテージ表記を絶対値に変換する関数
+# $1: 値 (例: "8G", "50%")
+# $2: 合計値 (メモリの場合はKB, CPUの場合はコア数)
+# $3: 単位 (例: "M", "G")
+resolve_value() {
+    local value="$1"
+    local total="$2"
+    local unit="$3"
+
+    if [[ "$value" == *"%"* ]]; then
+        local percentage="${value//%}"
+        # 少数点以下を切り捨て
+        local result=$((total * percentage / 100))
+        if [ "$unit" == "M" ]; then
+            # KB to MB
+            echo "$((result / 1024))M"
+        elif [ "$unit" == "G" ]; then
+             # KB to GB
+            echo "$((result / 1024 / 1024))G"
+        else
+            echo "$result"
+        fi
+    else
+        echo "$value"
+    fi
+}
+
+
+# --- サブコマンド: new ---
+
+usage_new() {
+    cat <<EOF
+Usage: $(basename "$0") new [options]
+
+Creates a new ChromeOS virtual machine configuration and starts the installer.
+
+Required Options:
+  --name <name>       A unique name for the new virtual machine.
+  --iso <path>        Path to the ChromeOS installation ISO image.
+  --disk <path>       Path for the virtual disk. Can be a block device (/dev/sdX)
+                      or a file path (will be created if it doesn't exist).
+
+Optional Options:
+  --disk-size <size>  Size for the new disk image if a file path is provided
+                      (e.g., 64G). (Default: 64G)
+  --cpu-cores <n|p%>  Number of CPU cores or percentage of total cores.
+                      (e.g., 4 or 50%). (Default: 2)
+  --memory <n|p%>     Amount of RAM or percentage of total RAM.
+                      (e.g., 8G or 50%). (Default: 4G)
+  --cpu-model <model> CPU model to emulate. (Default: host)
+EOF
+}
+
+cmd_new() {
+    # デフォルト値
+    local vm_name=""
+    local iso_path=""
+    local disk_path=""
+    local disk_size="64G"
+    local cpu_cores="2"
+    local memory="4G"
+    local cpu_model="host"
+
+    # 引数のパース
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name) vm_name="$2"; shift 2 ;;
+            --iso) iso_path="$2"; shift 2 ;;
+            --disk) disk_path="$2"; shift 2 ;;
+            --disk-size) disk_size="$2"; shift 2 ;;
+            --cpu-cores) cpu_cores="$2"; shift 2 ;;
+            --memory) memory="$2"; shift 2 ;;
+            --cpu-model) cpu_model="$2"; shift 2 ;;
+            --help) usage_new; exit 0 ;;
+            *) echo "Unknown option: $1" >&2; usage_new; exit 1 ;;
+        esac
+    done
+
+    # 必須オプションのチェック
+    if [ -z "$vm_name" ] || [ -z "$iso_path" ] || [ -z "$disk_path" ]; then
+        echo "Error: --name, --iso, and --disk are required." >&2
+        usage_new
+        exit 1
+    fi
+
+    local config_file="$MACHINES_DIR/$vm_name"
+    if [ -f "$config_file" ]; then
+        echo "Error: A virtual machine named '$vm_name' already exists." >&2
+        exit 1
+    fi
+
+    # ディスクの準備
+    if [ ! -b "$disk_path" ] && [ ! -f "$disk_path" ]; then
+        echo "Disk image not found. Creating new image at '$disk_path' with size $disk_size..."
+        qemu-img create -f raw "$disk_path" "$disk_size"
+    fi
+
+    # 設定ファイルを作成
+    echo "Creating configuration file at '$config_file'..."
+    mkdir -p "$MACHINES_DIR"
+    {
+        echo "VM_NAME='$vm_name'"
+        echo "ISO_PATH='$iso_path'"
+        echo "DISK_PATH='$disk_path'"
+        echo "CPU_CORES='$cpu_cores'"
+        echo "MEMORY='$memory'"
+        echo "CPU_MODEL='$cpu_model'"
+    } > "$config_file"
+
+    echo "Configuration for '$vm_name' created successfully."
+    echo "Starting installation..."
+
+    # インストールを開始
+    run_qemu "$vm_name" "install"
+}
+
+
+# --- サブコマンド: run ---
+
+usage_run() {
+    cat <<EOF
+Usage: $(basename "$0") run [name]
+
+Runs a specified virtual machine.
+If no name is provided, it runs the last executed machine.
+EOF
+}
+
+cmd_run() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ]; then
+        if [ -f "$LAST_RUN_FILE" ]; then
+            vm_name=$(cat "$LAST_RUN_FILE")
+            echo "No name specified, running last used machine: $vm_name"
+        else
+            echo "Error: No machine name specified and no last-run machine found." >&2
+            usage_run
+            exit 1
+        fi
+    fi
+
+    if [ "$vm_name" == "--help" ]; then
+        usage_run
+        exit 0
+    fi
+
+    run_qemu "$vm_name" "normal"
+}
+
+
+# --- サブコマンド: rm ---
+
+usage_rm() {
+    cat <<EOF
+Usage: $(basename "$0") rm <name>
+
+Removes a virtual machine's configuration.
+It will also offer to delete the associated disk image if it's a regular file.
+EOF
+}
+
+cmd_rm() {
+    local vm_name="${1:-}"
+
+    if [ -z "$vm_name" ] || [ "$vm_name" == "--help" ]; then
+        usage_rm
+        exit 1
+    fi
+
+    local config_file="$MACHINES_DIR/$vm_name"
+    if [ ! -f "$config_file" ]; then
+        echo "Error: No virtual machine named '$vm_name' found." >&2
+        exit 1
+    fi
+
+    # 設定を読み込む
+    source "$config_file"
+
+    read -p "Are you sure you want to remove the VM '$vm_name'? [y/N] " -n 1 -r
+    echo
+    if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+        echo "Removal cancelled."
+        exit 0
+    fi
+
+    # ディスクファイルの処理
+    if [ -f "$DISK_PATH" ]; then
+        read -p "Do you also want to delete the disk file '$DISK_PATH'? [y/N] " -n 1 -r
+        echo
+        if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+            echo "Deleting disk file: $DISK_PATH"
+            rm -f "$DISK_PATH"
+        fi
+    elif [ -b "$DISK_PATH" ]; then
+        echo "Warning: The disk path '$DISK_PATH' is a block device and will not be deleted."
+    fi
+    
+    # 設定に関連するファイルを削除
+    echo "Deleting VM configuration for '$vm_name'."
+    rm -f "$config_file"
+    rm -f "$MACHINES_DIR/${vm_name}.vars" # OVMF_VARSのコピーも削除
+
+    if [ -f "$LAST_RUN_FILE" ] && [ "$(cat "$LAST_RUN_FILE")" == "$vm_name" ]; then
+        rm -f "$LAST_RUN_FILE"
+    fi
+
+    echo "Successfully removed '$vm_name'."
+}
+
+# --- QEMU実行関数 ---
+
+run_qemu() {
+    local vm_name="$1"
+    local mode="$2" # "install" or "normal"
+    local config_file="$MACHINES_DIR/$vm_name"
+    
+    if [ ! -f "$config_file" ]; then
+        echo "Error: Configuration for '$vm_name' not found." >&2
+        exit 1
+    fi
+
+    # 設定を読み込む
+    source "$config_file"
+
+    # リソースを解決
+    local total_mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    local total_cores=$(nproc)
+    local resolved_mem=$(resolve_value "$MEMORY" "$total_mem_kb" "G")
+    local resolved_cores=$(resolve_value "$CPU_CORES" "$total_cores")
+
+    # UEFI変数の準備
+    local ovmf_vars_copy="$MACHINES_DIR/${vm_name}.vars"
+    if [ ! -f "$ovmf_vars_copy" ]; then
+        echo "Copying UEFI variables template..."
+        cp "$OVMF_VARS_TEMPLATE" "$ovmf_vars_copy"
+    fi
+
+    # QEMU引数配列を構築
+    local qemu_args=(
+        "-m" "$resolved_mem"
+        "-smp" "$resolved_cores"
+        "-cpu" "$cpu_model"
+        "-enable-kvm"
+        "-device" "virtio-vga-gl"
+        "-display" "sdl,gl=on"
+        "-usb"
+        "-device" "usb-tablet"
+        "-audiodev" "sdl,id=audio0"
+        "-device" "intel-hda"
+        "-device" "hda-output,audiodev=audio0"
+        "-drive" "if=pflash,format=raw,readonly=on,file=$OVMF_CODE_PATH"
+        "-drive" "if=pflash,format=raw,file=$ovmf_vars_copy"
+        "-drive" "format=raw,file=$DISK_PATH"
+    )
+
+    if [ "$mode" == "install" ]; then
+        qemu_args+=(
+            "-cdrom" "$ISO_PATH"
+            "-boot" "order=d"
+        )
+    fi
+
+    echo "---"
+    echo "Starting QEMU for '$vm_name'..."
+    echo "  QEMU Binary: $QEMU_BINARY"
+    echo "  Memory: $resolved_mem"
+    echo "  CPU Cores: $resolved_cores"
+    echo "  Disk: $DISK_PATH"
+    [ "$mode" == "install" ] && echo "  ISO (Install Mode): $ISO_PATH"
+    echo "---"
+
+    # 最終実行マシンを記録
+    echo "$vm_name" > "$LAST_RUN_FILE"
+
+    # QEMUを実行
+    exec "$QEMU_BINARY" "${qemu_args[@]}"
+}
+
+
+# --- メインロジック ---
+
+# スクリプトの初期化
+detect_arch
+mkdir -p "$MACHINES_DIR"
+
+# 引数がない場合はヘルプを表示
+if [ $# -eq 0 ]; then
+    usage
     exit 1
 fi
 
-# OVMF_VARS.fd が存在しない場合はコピーし、所有権を確認・変更
-if [ ! -f "$vmDir"/OVMF_VARS.fd ]; then
-    echo "Copying OVMF_VARS.fd to $vmDir"
-    cp /usr/share/OVMF/OVMF_VARS.fd "$vmDir"
-
-    # コピー後、OVMF_VARS.fdの所有者とグループを確認し、必要であれば変更
-    if [ -f "$vmDir"/OVMF_VARS.fd ]; then
-        current_uid=$(id -u)
-        current_gid=$(id -g)
-        file_uid=$(stat -c %u "$vmDir"/OVMF_VARS.fd)
-        file_gid=$(stat -c %g "$vmDir"/OVMF_VARS.fd)
-
-        if [ "$file_uid" -ne "$current_uid" ] || [ "$file_gid" -ne "$current_gid" ]; then
-            echo "Changing ownership of $vmDir/OVMF_VARS.fd to $USER:$USER"
-            chown "$current_uid":"$current_gid" "$vmDir"/OVMF_VARS.fd || {
-                echo "Warning: Could not change ownership of $vmDir/OVMF_VARS.fd. You might need to run this script with sudo or manually change ownership." >&2
-            }
-        fi
-    fi
-fi
-
-# CD-ROMオプションが指定されている場合（リカバリモードなど）
-if [ "${#cdromOpt[@]}" -gt 0 ]; then
-    echo "Starting QEMU with CD-ROM boot..."
-    exec qemu-system-x86_64 \
-    -display sdl,show-cursor=on \
-    "${cdromOpt[@]}" \
-    -drive format=raw,file="$hddImage" \
-    -m "$memory" \
-    -enable-kvm \
-    -smp "$smp" \
-    -usb -device usb-tablet \
-    -cpu host # CPUをホストに合わせることでパフォーマンス向上
-    exit
-fi
-
-# 通常の起動
-echo "Starting QEMU with ChromeOS..."
-exec qemu-system-x86_64 \
-    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
-    -drive if=pflash,format=raw,file="$vmDir"/OVMF_VARS.fd \
-    -display sdl,show-cursor=on,gl=on \
-    $vga \
-    -usb -device usb-tablet \
-    "${recoveryDriveOpt[@]}" \
-    -drive format=raw,file="$hddImage" \
-    -m "$memory" \
-    -enable-kvm \
-    -smp "$smp" \
-    -audiodev sdl,id=audio0 \
-    -device intel-hda -device hda-output,audiodev=audio0 \
-    -cpu host
+# サブコマンドをパースして実行
+subcommand="$1"
+shift
+case "$subcommand" in
+    new)
+        cmd_new "$@"
+        ;;
+    run)
+        cmd_run "$@"
+        ;;
+    rm)
+        cmd_rm "$@"
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        echo "Error: Unknown command '$subcommand'" >&2
+        usage
+        exit 1
+        ;;
+esac
