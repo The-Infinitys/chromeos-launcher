@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use std::env;
 #[cfg(target_family = "unix")] // Linuxを含むUnix系OSに限定
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf; // 実行可能ビットのチェックに必要
+ // 実行可能ビットのチェックに必要
 
 /// 指定されたコマンドが環境変数PATH経由で利用可能かどうかをチェックします。
 ///
@@ -28,7 +28,7 @@ pub fn is_available(cmd: &str) -> bool {
 
     // PATHをOS固有の区切り文字で分割し、各パスをイテレートします。
     for path_entry in env::split_paths(&path_env) {
-        let mut full_path = PathBuf::from(path_entry);
+        let mut full_path = path_entry;
         full_path.push(cmd); // コマンド名をパスに追加
 
         // ファイルが存在し、かつ実行可能であるかを確認します。

@@ -14,7 +14,7 @@ pub fn detect_arch() -> Result<QemuConfig, Error> {
     let (qemu_binary, ovmf_dir_name) = match arch {
         "x86_64" => ("qemu-system-x86_64", "OVMF"),
         "aarch64" => ("qemu-system-aarch64", "AAVMF"),
-        _ => return Err(Error::Io(std::io::Error::new(ErrorKind::Other, format!("Unsupported architecture: {}", arch)))),
+        _ => return Err(Error::Io(std::io::Error::other(format!("Unsupported architecture: {}", arch)))),
     };
 
     let ovmf_dir = PathBuf::from(format!("/usr/share/{}", ovmf_dir_name));

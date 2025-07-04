@@ -80,8 +80,8 @@ pub fn run_qemu(
 ) -> Result<(), Error> {
     let qemu_config = qemu::detect_arch()?;
 
-    let total_mem_kb = sys_info::mem_info().map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get memory info: {}", e))))?.total;
-    let total_cores = sys_info::cpu_num().map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to get CPU info: {}", e))))? as u64;
+    let total_mem_kb = sys_info::mem_info().map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get memory info: {}", e))))?.total;
+    let total_cores = sys_info::cpu_num().map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get CPU info: {}", e))))? as u64;
 
     let resolved_mem = qemu::resolve_value(memory, total_mem_kb, Some("G"));
     let resolved_cores = qemu::resolve_value(cpu_cores, total_cores, None);
@@ -153,7 +153,7 @@ pub fn run_qemu(
     }
     println!("---");
 
-    fs::write(&last_run_file, &vm_name)?;
+    fs::write(&last_run_file, vm_name)?;
 
     Command::new(&qemu_config.binary)
         .args(qemu_args)
