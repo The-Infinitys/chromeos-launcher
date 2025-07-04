@@ -3,6 +3,7 @@ use crate::utils::shell::{Args, SubCommands, is_available};
 
 pub mod list;
 pub mod new;
+pub mod recover;
 pub mod remove;
 pub mod run;
 
@@ -31,6 +32,9 @@ impl App {
             }
             SubCommands::Remove(remove_command) => {
                 remove_command.exec()?;
+            }
+            SubCommands::Recover(recover_command) => {
+                recover_command.exec()?;
             }
         }
         Ok(())

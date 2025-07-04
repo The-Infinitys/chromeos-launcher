@@ -60,7 +60,6 @@ impl RunCommand {
         let cpu_cores_str = config.get("CPU_CORES").unwrap_or(&"2");
         let cpu_model = config.get("CPU_MODEL").unwrap_or(&"host");
         let disk_path = config.get("DISK_PATH").unwrap();
-        let iso_path = config.get("ISO_PATH");
         let ovmf_code_str = config.get("OVMF_CODE").map(|s| s.to_string());
 
         let memory = ResourceValue::from_str(memory_str)?;
@@ -68,12 +67,8 @@ impl RunCommand {
 
         run_qemu(
             &vm_name,
-            if iso_path.is_some() {
-                "install"
-            } else {
-                "normal"
-            },
-            iso_path.map(|s| s.to_string()),
+            "normal",
+            None,
             disk_path,
             &cpu_cores,
             &memory,

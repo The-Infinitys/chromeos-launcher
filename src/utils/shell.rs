@@ -1,5 +1,6 @@
 // src/main.rs
 use crate::modules::app::new::NewCommand;
+use crate::modules::app::recover::RecoverCommand;
 use crate::modules::app::remove::RemoveCommand;
 use crate::modules::app::run::RunCommand;
 use clap::{Parser, Subcommand};
@@ -68,4 +69,5 @@ pub enum SubCommands {
     List,
     New(NewCommand),
     Remove(RemoveCommand),
+    Recover(RecoverCommand),
 }
