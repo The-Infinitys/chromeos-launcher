@@ -163,7 +163,7 @@ pub fn run_qemu(
 
         let ovmf_code_arg = format!("if=pflash,format=raw,readonly=on,file={}", ovmf_code_path.display());
         let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
-        let disk_arg = format!("format=qcow2,file={}", disk_path);
+        let disk_arg = format!("format=raw,file={}", disk_path);
 
         qemu_args.extend(vec![
             "-drive".to_string(), ovmf_code_arg,
