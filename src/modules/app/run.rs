@@ -123,7 +123,7 @@ pub fn run_qemu(
 
     if mode == "install" {
         if let Some(ref iso) = iso_path {
-            let disk_arg = format!("format=qcow2,file={}", disk_path);
+            let disk_arg = format!("format=raw,file={}", disk_path);
             qemu_args.extend(vec![
                 "-display".to_string(),
                 "sdl,show-cursor=on".to_string(),
