@@ -91,11 +91,13 @@ impl NewCommand {
             &self.name,
             "install",
             Some(self.iso.clone()),
+            None, // No recovery path in new command
             &self.disk,
             &self.cpu_cores,
             &self.memory,
             &self.cpu_model,
             self.ovmf_code.clone(),
+            false, // No 3D accel in new command
         )?;
 
         Ok(())

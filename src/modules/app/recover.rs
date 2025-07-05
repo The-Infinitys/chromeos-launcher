@@ -62,11 +62,13 @@ impl RecoverCommand {
             &self.name,
             "install",
             Some(self.iso.clone()),
+            None, // No recovery path in recover command
             disk_path,
             &cpu_cores,
             &memory,
             cpu_model,
             ovmf_code_str,
+            false, // No 3D accel in recover command
         )?;
 
         Ok(())
