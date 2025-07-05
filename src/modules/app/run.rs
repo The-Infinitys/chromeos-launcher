@@ -5,6 +5,7 @@ use clap::Args;
 use dirs;
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf; // Import PathBuf
 use std::process::{Command, Stdio};
 use std::str::FromStr;
 
@@ -59,26 +60,73 @@ impl RunCommand {
             })
             .collect();
 
+        // Retrieve config values with defaults
         let memory_str = config.get("MEMORY").unwrap_or(&"4G");
         let cpu_cores_str = config.get("CPU_CORES").unwrap_or(&"2");
         let cpu_model = config.get("CPU_MODEL").unwrap_or(&"host");
-        let disk_path = config.get("DISK_PATH").unwrap().to_string();
+        let disk_path_str = config.get("DISK_PATH").map(|s| s.to_string()); // Make disk_path optional for now to handle creation
         let ovmf_code_str = config.get("OVMF_CODE").map(|s| s.to_string());
         let recovery_path = config.get("RECOVERY_PATH").map(|s| s.to_string());
         let use_3d_accel = config
             .get("USE_3D_ACCEL")
             .and_then(|s| s.parse::<bool>().ok())
             .unwrap_or(false);
+        let hdd_size = config.get("HDD_SIZE").unwrap_or(&"50G"); // New: HDD Size for creation
 
         let memory = ResourceValue::from_str(memory_str)?;
         let cpu_cores = ResourceValue::from_str(cpu_cores_str)?;
 
+        // --- Start: Logic for disk image creation (similar to bash script) ---
+        let disk_path = if let Some(path) = disk_path_str {
+            PathBuf::from(path)
+        } else {
+            // Default disk path if not specified in config
+            config_dir.join("machines").join(&vm_name).join("image.img")
+        };
+
+        if !disk_path.exists() {
+            println!("---");
+            println!(
+                "Disk image '{}' not found. Creating a new one...",
+                disk_path.display()
+            );
+
+            // Ensure the parent directory exists
+            if let Some(parent) = disk_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+
+            // Execute qemu-img create
+            let hdd_size_str = hdd_size; // Use the configured HDD size
+            let status = Command::new("qemu-img")
+                .args(&[
+                    "create",
+                    "-f",
+                    "raw",
+                    disk_path.to_str().unwrap(),
+                    hdd_size_str,
+                ])
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
+                .status()?;
+
+            if !status.success() {
+                return Err(Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("Failed to create disk image: {}", disk_path.display()),
+                )));
+            }
+            println!("Disk image created successfully.");
+            println!("---");
+        }
+        // --- End: Logic for disk image creation ---
+
         run_qemu(
             &vm_name,
             "run",
-            None,
+            None, // iso_path is handled by `install` mode, not `run` command
             recovery_path,
-            &disk_path,
+            &disk_path.to_string_lossy(), // Pass disk_path as &str
             &cpu_cores,
             &memory,
             cpu_model,
@@ -95,7 +143,7 @@ pub fn run_qemu(
     mode: &str,
     iso_path: Option<String>,
     recovery_path: Option<String>,
-    disk_path: &str,
+    disk_path: &str, // This is now always the path, not an optional
     cpu_cores: &ResourceValue,
     memory: &ResourceValue,
     cpu_model: &str,
@@ -105,17 +153,30 @@ pub fn run_qemu(
     let qemu_config = qemu::detect_arch()?;
 
     let total_mem_kb = sys_info::mem_info()
-        .map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get memory info: {}", e))))?
+        .map_err(|e| {
+            Error::Io(std::io::Error::other(format!(
+                "Failed to get memory info: {}",
+                e
+            )))
+        })?
         .total;
-    let total_cores = sys_info::cpu_num()
-        .map_err(|e| Error::Io(std::io::Error::other(format!("Failed to get CPU info: {}", e))))?
-        as u64;
+    let total_cores = sys_info::cpu_num().map_err(|e| {
+        Error::Io(std::io::Error::other(format!(
+            "Failed to get CPU info: {}",
+            e
+        )))
+    })? as u64;
 
     let resolved_mem = qemu::resolve_value(memory, total_mem_kb, Some("G"));
     let resolved_cores = qemu::resolve_value(cpu_cores, total_cores, None);
 
     let config_dir = dirs::home_dir()
-        .ok_or_else(|| Error::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "Home directory not found")))?
+        .ok_or_else(|| {
+            Error::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Home directory not found",
+            ))
+        })?
         .join(".chromeos-launcher");
     let last_run_file = config_dir.join("last_run");
 
@@ -123,24 +184,12 @@ pub fn run_qemu(
 
     if mode == "install" {
         if let Some(ref iso) = iso_path {
-            let disk_arg = format!("format=raw,file={}", disk_path);
+            // Use raw format here for the primary disk
             qemu_args.extend(vec![
-                "-display".to_string(),
-                "sdl,show-cursor=on".to_string(),
                 "-boot".to_string(),
                 "order=d".to_string(),
                 "-cdrom".to_string(),
                 iso.to_string(),
-                "-drive".to_string(),
-                disk_arg,
-                "-m".to_string(),
-                resolved_mem.clone(),
-                "-enable-kvm".to_string(),
-                "-smp".to_string(),
-                resolved_cores.clone(),
-                "-usb".to_string(),
-                "-device".to_string(),
-                "usb-tablet".to_string(),
             ]);
         } else {
             return Err(Error::Io(std::io::Error::new(
@@ -148,58 +197,82 @@ pub fn run_qemu(
                 "Install mode requires an ISO path.",
             )));
         }
-    } else {
-        let machines_dir = config_dir.join("machines");
-        let ovmf_vars_copy = machines_dir.join(format!("{}.vars", vm_name));
-        if !ovmf_vars_copy.exists() {
+    }
+    let machines_dir = config_dir.join("machines");
+    let ovmf_vars_copy = machines_dir.join(format!("{}.vars", vm_name));
+    if !ovmf_vars_copy.exists() {
+        // Check if source OVMF_VARS.fd exists before copying
+        if qemu_config.ovmf_vars_template.exists() {
             fs::copy(&qemu_config.ovmf_vars_template, &ovmf_vars_copy)?;
-        }
-
-        let ovmf_code_path = if let Some(path) = ovmf_code {
-            std::path::PathBuf::from(path)
         } else {
-            qemu_config.ovmf_code_path.clone()
-        };
-
-        let ovmf_code_arg = format!("if=pflash,format=raw,readonly=on,file={}", ovmf_code_path.display());
-        let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
-        let disk_arg = format!("format=raw,file={}", disk_path);
-
-        qemu_args.extend(vec![
-            "-drive".to_string(), ovmf_code_arg,
-            "-drive".to_string(), ovmf_vars_arg,
-            "-display".to_string(), "sdl,show-cursor=on,gl=on".to_string(),
-            "-usb".to_string(),
-            "-device".to_string(), "usb-tablet".to_string(),
-        ]);
-
-        if let Some(rec_path) = recovery_path {
-            qemu_args.push("-drive".to_string());
-            qemu_args.push(format!("format=raw,file={}", rec_path));
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "OVMF_VARS.fd template not found at {}",
+                    qemu_config.ovmf_vars_template.display()
+                ),
+            )));
         }
+    }
 
+    let ovmf_code_path = if let Some(path) = ovmf_code {
+        PathBuf::from(path)
+    } else {
+        qemu_config.ovmf_code_path.clone()
+    };
+
+    let ovmf_code_arg = format!(
+        "if=pflash,format=raw,readonly=on,file={}",
+        ovmf_code_path.display()
+    );
+    let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
+    // Use raw format for the primary disk here as well
+    let disk_arg = format!("format=raw,file={}", disk_path);
+
+    qemu_args.extend(vec![
+        "-drive".to_string(),
+        ovmf_code_arg,
+        "-drive".to_string(),
+        ovmf_vars_arg,
+        "-display".to_string(),
+        "sdl,show-cursor=on,gl=on".to_string(), // Keep gl=on as in bash script
+        "-usb".to_string(),
+        "-device".to_string(),
+        "usb-tablet".to_string(),
+    ]);
+
+    if let Some(rec_path) = recovery_path {
         qemu_args.push("-drive".to_string());
-        qemu_args.push(disk_arg);
+        qemu_args.push(format!("format=raw,file={}", rec_path)); // Recovery path can remain raw
+    }
 
+    qemu_args.push("-drive".to_string());
+    qemu_args.push(disk_arg); // This is the primary disk
+
+    qemu_args.extend(vec![
+        "-m".to_string(),
+        resolved_mem.clone(),
+        "-enable-kvm".to_string(),
+        "-smp".to_string(),
+        resolved_cores.clone(),
+        "-audiodev".to_string(),
+        "sdl,id=audio0".to_string(),
+        "-device".to_string(),
+        "intel-hda".to_string(),
+        "-device".to_string(),
+        "hda-output,audiodev=audio0".to_string(),
+        "-cpu".to_string(),
+        cpu_model.to_string(),
+    ]);
+
+    if use_3d_accel {
+        qemu_args.extend(vec!["-vga".to_string(), "virtio".to_string()]); // Equivalent to -3 in bash script
+    } else {
+        let (xres, yres) = (1280, 800); // These should probably be configurable too
         qemu_args.extend(vec![
-            "-m".to_string(), resolved_mem.clone(),
-            "-enable-kvm".to_string(),
-            "-smp".to_string(), resolved_cores.clone(),
-            "-audiodev".to_string(), "sdl,id=audio0".to_string(),
-            "-device".to_string(), "intel-hda".to_string(),
-            "-device".to_string(), "hda-output,audiodev=audio0".to_string(),
-            "-cpu".to_string(), cpu_model.to_string(),
+            "-device".to_string(),
+            format!("virtio-vga-gl,xres={},yres={}", xres, yres),
         ]);
-
-        if use_3d_accel {
-            qemu_args.extend(vec!["-vga".to_string(), "virtio".to_string()]);
-        } else {
-            let (xres, yres) = (1280, 800);
-            qemu_args.extend(vec![
-                "-device".to_string(),
-                format!("virtio-vga-gl,xres={},yres={}", xres, yres),
-            ]);
-        }
     }
 
     println!("---");
@@ -223,12 +296,21 @@ pub fn run_qemu(
     fs::write(&last_run_file, vm_name)?;
 
     let qemu_args_str: Vec<&str> = qemu_args.iter().map(|s| s.as_str()).collect();
-    Command::new(&qemu_config.binary)
+    let qemu_command = Command::new(&qemu_config.binary)
         .args(&qemu_args_str)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()?;
 
+    if !qemu_command.success() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "QEMU exited with an error. Exit code: {:?}",
+                qemu_command.code()
+            ),
+        )));
+    }
+
     Ok(())
 }
-
