@@ -184,12 +184,9 @@ pub fn run_qemu(
 
     if mode == "install" {
         if let Some(ref iso) = iso_path {
-            // Use raw format here for the primary disk
             qemu_args.extend(vec![
-                "-boot".to_string(),
-                "order=d".to_string(),
-                "-cdrom".to_string(),
-                iso.to_string(),
+                "-drive".to_string(),
+                format!("format=raw,file={}", iso),
             ]);
         } else {
             return Err(Error::Io(std::io::Error::new(
@@ -201,7 +198,6 @@ pub fn run_qemu(
     let machines_dir = config_dir.join("machines");
     let ovmf_vars_copy = machines_dir.join(format!("{}.vars", vm_name));
     if !ovmf_vars_copy.exists() {
-        // Check if source OVMF_VARS.fd exists before copying
         if qemu_config.ovmf_vars_template.exists() {
             fs::copy(&qemu_config.ovmf_vars_template, &ovmf_vars_copy)?;
         } else {
@@ -221,35 +217,39 @@ pub fn run_qemu(
         qemu_config.ovmf_code_path.clone()
     };
 
-    let ovmf_code_arg = format!(
-        "if=pflash,format=raw,readonly=on,file={}",
-        ovmf_code_path.display()
-    );
-    let ovmf_vars_arg = format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display());
-    // Use raw format for the primary disk here as well
-    let disk_arg = format!("format=raw,file={}", disk_path);
-
     qemu_args.extend(vec![
         "-drive".to_string(),
-        ovmf_code_arg,
+        format!(
+            "if=pflash,format=raw,readonly=on,file={}",
+            ovmf_code_path.display()
+        ),
         "-drive".to_string(),
-        ovmf_vars_arg,
+        format!("if=pflash,format=raw,file={}", ovmf_vars_copy.display()),
         "-display".to_string(),
-        "sdl,show-cursor=on,gl=on".to_string(), // Keep gl=on as in bash script
+        "sdl,show-cursor=on,gl=on".to_string(),
         "-usb".to_string(),
         "-device".to_string(),
         "usb-tablet".to_string(),
     ]);
 
-    if let Some(rec_path) = recovery_path {
-        qemu_args.push("-drive".to_string());
-        qemu_args.push(format!("format=raw,file={}", rec_path)); // Recovery path can remain raw
+    if use_3d_accel {
+        qemu_args.extend(vec!["-vga".to_string(), "virtio".to_string()]);
+    } else {
+        let (xres, yres) = (1280, 800);
+        qemu_args.extend(vec![
+            "-device".to_string(),
+            format!("virtio-vga-gl,xres={},yres={}", xres, yres),
+        ]);
     }
 
-    qemu_args.push("-drive".to_string());
-    qemu_args.push(disk_arg); // This is the primary disk
+    if let Some(rec_path) = recovery_path {
+        qemu_args.push("-drive".to_string());
+        qemu_args.push(format!("format=raw,file={}", rec_path));
+    }
 
     qemu_args.extend(vec![
+        "-drive".to_string(),
+        format!("format=raw,file={}", disk_path),
         "-m".to_string(),
         resolved_mem.clone(),
         "-enable-kvm".to_string(),
@@ -264,16 +264,6 @@ pub fn run_qemu(
         "-cpu".to_string(),
         cpu_model.to_string(),
     ]);
-
-    if use_3d_accel {
-        qemu_args.extend(vec!["-vga".to_string(), "virtio".to_string()]); // Equivalent to -3 in bash script
-    } else {
-        let (xres, yres) = (1280, 800); // These should probably be configurable too
-        qemu_args.extend(vec![
-            "-device".to_string(),
-            format!("virtio-vga-gl,xres={},yres={}", xres, yres),
-        ]);
-    }
 
     println!("---");
     println!("Starting QEMU for '{}'...", vm_name);
